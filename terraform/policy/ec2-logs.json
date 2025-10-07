@@ -1,0 +1,16 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowEC2PutLogs",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "*"
+      },
+      "Action": [
+        "s3:PutObject"
+      ],
+  "Resource": "arn:aws:s3:::balteen121-ec2-logs/*"
+    }
+  ]
+}
