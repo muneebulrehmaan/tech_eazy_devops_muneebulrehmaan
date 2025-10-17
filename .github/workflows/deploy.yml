@@ -1,4 +1,4 @@
-name: Build Jar
+name: Build & Deploy
 
 on:
   push:
@@ -8,6 +8,7 @@ on:
       - 'app/**'
       - 'terraform/**'
       - 'scripts/**'
+  workflow_dispatch: # enables manual runs
 
 jobs:
   deploy:
@@ -46,7 +47,10 @@ jobs:
       # 5️⃣ Terraform Init
       - name: Terraform Init
         working-directory: ${{ env.TF_WORKDIR }}
-        run: terraform init -backend-config="bucket=balteen121-tfstate" -backend-config="key=terraform.tfstate" -backend-config="region=${{ env.AWS_REGION }}" -backend-config="dynamodb_table=terraform-locks"
+        run: terraform init -backend-config="bucket=balteen121-tfstate" \
+                           -backend-config="key=terraform.tfstate" \
+                           -backend-config="region=${{ env.AWS_REGION }}" \
+                           -backend-config="dynamodb_table=terraform-locks"
 
       # 6️⃣ Terraform Plan
       - name: Terraform Plan
