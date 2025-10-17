@@ -35,7 +35,7 @@ jobs:
       # 3️⃣ Upload latest JAR to S3
       - name: Upload JAR to S3
         run: |
-          aws s3 cp ./app/${JAR_NAME} s3://balteen121/${JAR_NAME} --acl bucket-owner-full-control
+          aws s3 cp ./app/target/${JAR_NAME} s3://balteen121/${JAR_NAME} --acl bucket-owner-full-control
           echo "Uploaded ${JAR_NAME} to S3 bucket balteen121"
 
       # 4️⃣ Install Terraform
