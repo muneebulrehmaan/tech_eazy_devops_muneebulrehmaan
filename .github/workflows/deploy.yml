@@ -66,3 +66,4 @@ jobs:
       - name: Output
         working-directory: ${{ env.TF_WORKDIR }}
         run: terraform output
+      ###################
