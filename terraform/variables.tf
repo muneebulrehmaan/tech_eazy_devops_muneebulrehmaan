@@ -17,16 +17,22 @@ variable "instance_type" {
   default     = "t3.micro"
 }
 
-# Number of EC2 instances (for load balancing)
-variable "instance_count" {
-  description = "Number of EC2 instances to launch"
-  type        = number
-  default     = 2
-}
-
 # AWS region
-variable "region" {
-  description = "AWS region to deploy resources"
+variable "aws_region" {
+  description = "AWS region where resources are deployed"
   type        = string
   default     = "ap-south-1"
+}
+
+# Name of the application JAR stored in S3
+variable "jar_name" {
+  description = "JAR filename to be downloaded from S3 bucket"
+  type        = string
+  default     = "hellomvc-0.0.1-SNAPSHOT.jar"
+}
+
+variable "ec2_logs_bucket" {
+  description = "S3 bucket name where EC2 instances can push logs (optional)"
+  type        = string
+  default     = "balteen-ec2-logs"
 }
