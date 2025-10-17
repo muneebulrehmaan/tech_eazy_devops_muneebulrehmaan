@@ -19,7 +19,6 @@ resource "aws_elb" "app_clb" {
     unhealthy_threshold = 2
   }
 
-  instances = aws_instance.app_server[*].id
 
   tags = {
     Name = "${var.app_bucket_name}-CLB"

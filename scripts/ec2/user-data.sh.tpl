@@ -1,48 +1,68 @@
 #!/bin/bash
+set -euo pipefail
 
-APP_BUCKET="${app_bucket_name}"
+# Variables substituted by templatefile in Terraform launch template
+APP_BUCKET_NAME="${app_bucket_name}"
 JAR_NAME="${JAR_NAME}"
 APP_PATH="${APP_PATH}"
 LOG_PATH="${LOG_PATH}"
 
-# Install Java if not installed
-if ! java -version 2>&1 | grep -q "17"; then
-  amazon-linux-extras enable corretto17
-  yum install -y java-17-amazon-corretto
-fi
+# Update & install awslogs
+yum update -y
+yum install -y awslogs aws-cli java-1.8.0-openjdk
 
+# Ensure log file exists
+mkdir -p /home/ec2-user
+touch ${LOG_PATH}
+chown ec2-user:ec2-user ${LOG_PATH}
 
-# Install AWS CLI if not installed
-if ! type aws >/dev/null 2>&1; then
-  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-  unzip awscliv2.zip
-  sudo ./aws/install
-fi
+# CloudWatch Logs agent configuration
+cat <<'CWCONF' > /etc/awslogs/awslogs.conf
+[general]
+state_file = /var/lib/awslogs/agent-state
 
-# Poll S3 bucket every minute for updated JAR and restart app if changed
-while true; do
-  echo "$(date): Checking for updates..."
+[app_log]
+file = /home/ec2-user/app.log
+log_group_name = /aws/asg/${app_bucket_name}-logs
+log_stream_name = {instance_id}/app
+datetime_format = %b %d %H:%M:%S
+CWCONF
 
-# Download latest JAR
-aws s3 cp s3://${app_bucket_name}/${JAR_NAME} ${APP_PATH}.new
+# Ensure awslogs knows the region
+REGION=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | grep region | awk -F\" '{print $4}')
+mkdir -p /etc/awslogs
+cat <<EOF > /etc/awslogs/awscli.conf
+[plugins]
+cwlogs = cwlogs
+[default]
+region = ${REGION}
+EOF
 
-# Give ownership to ec2-user
-chown ec2-user:ec2-user ${APP_PATH}.new
+# Start awslogs
+systemctl enable awslogsd.service || true
+systemctl restart awslogsd.service || true
 
-# Give execution permissions
-chmod 755 ${APP_PATH}.new
+# Record boot time to app log
+echo "Instance $(hostname) launched at $(date --iso-8601=seconds)" >> ${LOG_PATH}
 
-if [ ! -f "${APP_PATH}" ] || ! cmp -s "${APP_PATH}" "${APP_PATH}.new"; then
-    echo "$(date): New JAR detected. Updating..."
-
-    pkill -f "${JAR_NAME}" || true
-
-    mv ${APP_PATH}.new ${APP_PATH}
-    nohup java -jar ${APP_PATH} > ${LOG_PATH} 2>&1 &
-else
-    rm ${APP_PATH}.new
-fi
-
-
-  sleep 60
+# Fetch the latest JAR from S3 (retries to handle eventual consistency)
+RETRIES=5
+COUNT=0
+until [ $${COUNT} -ge $${RETRIES} ]
+do
+  if aws s3 cp s3://$${APP_BUCKET_NAME}/$${JAR_NAME} $${APP_PATH}; then
+    echo "Downloaded $${JAR_NAME} from s3://$${APP_BUCKET_NAME}" >> $${LOG_PATH}
+    break
+  else
+    echo "Failed to download JAR, retrying... ($${COUNT})" >> $${LOG_PATH}
+    COUNT=$$((COUNT+1))
+    sleep 5
+  fi
 done
+
+
+# Start the Java app in background and redirect output to app log
+nohup java -jar ${APP_PATH} >> ${LOG_PATH} 2>&1 &
+
+# Write PID & launched time
+echo "App started with PID $! at $(date --iso-8601=seconds)" >> ${LOG_PATH}

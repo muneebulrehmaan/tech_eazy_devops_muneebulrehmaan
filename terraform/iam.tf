@@ -82,3 +82,9 @@ resource "aws_iam_instance_profile" "ec2_profile" {
   name = "ec2-app-instance-profile"
   role = aws_iam_role.ec2_role.name
 }
+
+# Attach AWS-managed CloudWatch Agent Server policy (recommended)
+resource "aws_iam_role_policy_attachment" "attach_cloudwatch_logs" {
+  role       = aws_iam_role.ec2_role.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
