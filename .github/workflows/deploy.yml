@@ -43,26 +43,6 @@ jobs:
         with:
           terraform_version: 1.13.3
 
-      # 7️⃣ Initialize Terraform
-      - name: Terraform Init
-        working-directory: ${{ env.TF_WORKDIR }}
-        run: terraform init
-
-      # 8️⃣ Terraform Plan
-      - name: Terraform Plan
-        working-directory: ${{ env.TF_WORKDIR }}
-        run: terraform plan -out=tfplan
-
-      # 9️⃣ Terraform Apply
-      - name: Terraform Apply
-        working-directory: ${{ env.TF_WORKDIR }}
-        run: terraform apply -auto-approve tfplan
-
-      # 🔟 Output results
-      - name: Terraform Output
-        working-directory: ${{ env.TF_WORKDIR }}
-        run: terraform output
-
       # 5️⃣ Upload latest JAR to S3
       - name: Upload JAR to S3
         run: |
