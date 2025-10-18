@@ -30,13 +30,6 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      # 3️⃣ Build the JAR using Maven
-      - name: Build JAR
-        run: |
-          cd app
-          mvn clean package -DskipTests
-          ls target
-
       # 4️⃣ Configure AWS credentials
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -77,5 +70,11 @@ jobs:
           echo "Uploading $JAR_NAME to S3..."
           aws s3 cp app/target/${JAR_NAME} s3://${{ env.S3_BUCKET }}/${JAR_NAME} --acl bucket-owner-full-control
           echo "✅ Uploaded ${JAR_NAME} to S3 bucket ${{ env.S3_BUCKET }}"
+           # 3️⃣ Build the JAR using Maven
+      - name: Build JAR
+        run: |
+          cd app
+          mvn clean package -DskipTests
+          ls target
 
     
