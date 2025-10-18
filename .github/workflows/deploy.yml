@@ -44,16 +44,7 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
-
-      # 5️⃣ Upload latest JAR to S3
-      - name: Upload JAR to S3
-        run: |
-          JAR_NAME=$(ls app/target/*.jar | xargs -n 1 basename)
-          echo "Uploading $JAR_NAME to S3..."
-          aws s3 cp app/target/${JAR_NAME} s3://${{ env.S3_BUCKET }}/${JAR_NAME} --acl bucket-owner-full-control
-          echo "✅ Uploaded ${JAR_NAME} to S3 bucket ${{ env.S3_BUCKET }}"
-
-      # 6️⃣ Install Terraform
+            # 6️⃣ Install Terraform
       - name: Install Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -78,3 +69,13 @@ jobs:
       - name: Terraform Output
         working-directory: ${{ env.TF_WORKDIR }}
         run: terraform output
+
+      # 5️⃣ Upload latest JAR to S3
+      - name: Upload JAR to S3
+        run: |
+          JAR_NAME=$(ls app/target/*.jar | xargs -n 1 basename)
+          echo "Uploading $JAR_NAME to S3..."
+          aws s3 cp app/target/${JAR_NAME} s3://${{ env.S3_BUCKET }}/${JAR_NAME} --acl bucket-owner-full-control
+          echo "✅ Uploaded ${JAR_NAME} to S3 bucket ${{ env.S3_BUCKET }}"
+
+    
