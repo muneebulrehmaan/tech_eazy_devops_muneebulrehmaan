@@ -1,30 +1,28 @@
-name: Build & Deploy
+name: Deploy JAR to S3
 
 on:
-  push:
-    branches:
-      - pr-task
-    paths:
-      - 'app/**'
-      - 'terraform/**'
-      - 'scripts/**'
-  workflow_dispatch: # enables manual runs
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
-    env:
-      AWS_REGION: ap-south-1
-      JAR_NAME: hellomvc-0.0.1-SNAPSHOT.jar
-      TF_WORKDIR: ./terraform
-
     steps:
-      # 1️⃣ Checkout repo
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      # 2️⃣ Configure AWS credentials
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'        # or your app’s version
+          distribution: 'temurin'
+
+      - name: Build JAR
+        run: |
+          cd app
+          mvn clean package -DskipTests
+          ls target  # just to verify the jar exists
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
@@ -32,38 +30,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # 3️⃣ Upload latest JAR to S3
       - name: Upload JAR to S3
         run: |
-          aws s3 cp ./app/target/${JAR_NAME} s3://balteen121/${JAR_NAME} --acl bucket-owner-full-control
-          echo "Uploaded ${JAR_NAME} to S3 bucket balteen121"
-
-      # 4️⃣ Install Terraform
-      - name: Install Terraform
-        uses: hashicorp/setup-terraform@v2
-        with:
-          terraform_version: 1.7.7
-
-      # 5️⃣ Terraform Init
-      - name: Terraform Init
-        working-directory: ${{ env.TF_WORKDIR }}
-        run: terraform init -backend-config="bucket=balteen121-tfstate" \
-                           -backend-config="key=terraform.tfstate" \
-                           -backend-config="region=${{ env.AWS_REGION }}" \
-                           -backend-config="dynamodb_table=terraform-locks"
-
-      # 6️⃣ Terraform Plan
-      - name: Terraform Plan
-        working-directory: ${{ env.TF_WORKDIR }}
-        run: terraform plan -out=tfplan
-
-      # 7️⃣ Terraform Apply
-      - name: Terraform Apply
-        working-directory: ${{ env.TF_WORKDIR }}
-        run: terraform apply -auto-approve tfplan
-
-      # 8️⃣ Confirm deployment
-      - name: Output
-        working-directory: ${{ env.TF_WORKDIR }}
-        run: terraform output
-      ###################
+          JAR_NAME=$(ls app/target/*.jar | xargs -n 1 basename)
+          aws s3 cp ../app/target/${JAR_NAME} s3://balteen121/${JAR_NAME} --acl bucket-owner-full-control
