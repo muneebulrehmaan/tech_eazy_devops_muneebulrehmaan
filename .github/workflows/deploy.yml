@@ -37,9 +37,4 @@ jobs:
           JAR_FILE=$(ls app/target/*.jar | head -n 1)
           aws s3 cp "$JAR_FILE" s3://balteen121/ --acl bucket-owner-full-control
 
-      # Optional: Trigger Auto Scaling Group instance refresh
-      - name: Refresh ASG to redeploy new version
-        run: |
-          aws autoscaling start-instance-refresh \
-            --auto-scaling-group-name balteen121-asg \
-            --preferences '{"InstanceWarmup":300,"MinHealthyPercentage":100}'
+  
