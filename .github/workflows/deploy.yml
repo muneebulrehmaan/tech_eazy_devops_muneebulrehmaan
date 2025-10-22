@@ -1,60 +1,45 @@
-name: Build and Deploy App
+name: Deploy JAR to AWS
 
 on:
+  workflow_dispatch: # manual trigger
   push:
     branches:
       - pr-task
-    paths:
-      - 'app/**'
-      - 'terraform/**'
-      - '.github/workflows/deploy.yml'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
-    env:
-      AWS_REGION: ap-south-1
-      S3_BUCKET: balteen121
-      TF_WORKDIR: ./terraform
-
     steps:
-      # 1️⃣ Checkout repository
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2️⃣ Set up JDK (for building the JAR)
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
+          java-version: '17'  # adjust if different
           distribution: 'temurin'
-          java-version: '17'
 
-      # 4️⃣ Configure AWS credentials
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-            # 6️⃣ Install Terraform
-      - name: Install Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.13.3
-
-      # 5️⃣ Upload latest JAR to S3
-      - name: Upload JAR to S3
-        run: |
-          JAR_NAME=$(ls app/target/*.jar | xargs -n 1 basename)
-          echo "Uploading $JAR_NAME to S3..."
-          aws s3 cp app/target/${JAR_NAME} s3://${{ env.S3_BUCKET }}/${JAR_NAME} --acl bucket-owner-full-control
-          echo "✅ Uploaded ${JAR_NAME} to S3 bucket ${{ env.S3_BUCKET }}"
-           # 3️⃣ Build the JAR using Maven
       - name: Build JAR
         run: |
           cd app
           mvn clean package -DskipTests
-          ls target
 
-    
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1  # your region
+
+      - name: Upload JAR to S3
+        run: |
+          JAR_FILE=$(ls app/target/*.jar | head -n 1)
+          aws s3 cp "$JAR_FILE" s3://balteen121/ --acl bucket-owner-full-control
+
+      # Optional: Trigger Auto Scaling Group instance refresh
+      - name: Refresh ASG to redeploy new version
+        run: |
+          aws autoscaling start-instance-refresh \
+            --auto-scaling-group-name balteen121-asg \
+            --preferences '{"InstanceWarmup":300,"MinHealthyPercentage":100}'
