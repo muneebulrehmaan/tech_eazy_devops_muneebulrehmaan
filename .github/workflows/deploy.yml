@@ -17,7 +17,7 @@ jobs:
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
-          java-version: '17'  # adjust if different
+          java-version: '17'
           distribution: 'temurin'
 
       - name: Build JAR
@@ -30,11 +30,22 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ap-south-1  # your region
+          aws-region: ap-south-1
 
       - name: Upload JAR to S3
         run: |
-          JAR_FILE=$(ls app/target/*.jar | head -n 1)
-          aws s3 cp "$JAR_FILE" s3://balteen121/ --acl bucket-owner-full-control
-
-  
+          # Find the JAR file
+          JAR_FILE=$(find app/target -name "*.jar" -not -name "*sources*" -not -name "*javadoc*" | head -n 1)
+          
+          # Check if JAR file exists
+          if [ -z "$JAR_FILE" ]; then
+            echo "Error: No JAR file found in app/target/"
+            exit 1
+          fi
+          
+          echo "Uploading JAR: $JAR_FILE"
+          
+          # Upload with specific filename that matches your user data
+          aws s3 cp "$JAR_FILE" s3://balteen121/hellomvc-0.0.1-SNAPSHOT.jar
+          
+          echo "JAR uploaded successfully to s3://balteen121/hellomvc-0.0.1-SNAPSHOT.jar"
