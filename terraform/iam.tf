@@ -52,8 +52,8 @@ resource "aws_iam_policy" "ec2_logs_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = ["s3:PutObject"]
+        Effect   = "Allow"
+        Action   = ["s3:PutObject"]
         Resource = "${aws_s3_bucket.ec2_logs_bucket.arn}/*"
       }
     ]

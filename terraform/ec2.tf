@@ -35,6 +35,10 @@ resource "aws_launch_template" "app_server_lt" {
   image_id      = data.aws_ami.amazon_linux.id
   instance_type = var.instance_type
   key_name      = data.aws_key_pair.default.key_name
+  network_interfaces {
+    associate_public_ip_address = true
+    security_groups             = [aws_security_group.ec2_sg.id] # This references the correct SG
+  }
 
   iam_instance_profile {
     name = aws_iam_instance_profile.ec2_profile.name
@@ -53,32 +57,6 @@ resource "aws_launch_template" "app_server_lt" {
     tags = {
       Name = "${var.app_bucket_name}-AppServer"
     }
-  }
-}
-
-############################################
-# Auto Scaling Group
-############################################
-resource "aws_autoscaling_group" "app_asg" {
-  name                = "${var.app_bucket_name}-asg"
-  min_size            = 2
-  max_size            = 4
-  desired_capacity    = 2
-  vpc_zone_identifier = data.aws_subnets.default.ids
-
-  launch_template {
-    id      = aws_launch_template.app_server_lt.id
-    version = "$Latest"
-  }
-
-  load_balancers            = [aws_elb.app_clb.name]
-  health_check_type         = "EC2"
-  health_check_grace_period = 300
-
-  tag {
-    key                 = "Name"
-    value               = "${var.app_bucket_name}-AppServer"
-    propagate_at_launch = true
   }
 }
 
