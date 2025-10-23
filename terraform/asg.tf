@@ -1,106 +1,96 @@
-############################################
 # Auto Scaling Group
-############################################
 resource "aws_autoscaling_group" "app_asg" {
-  name                = "${var.app_bucket_name}-asg"
-  min_size            = 2
-  max_size            = 4
-  desired_capacity    = 2
-  vpc_zone_identifier = data.aws_subnets.default.ids
-
+  name                      = "${var.app_name}-asg"
+  max_size                  = var.max_size
+  min_size                  = var.min_size
+  desired_capacity          = var.desired_capacity
+  health_check_type         = "ELB"
+  health_check_grace_period = 300
+  force_delete              = true
   launch_template {
-    id      = aws_launch_template.app_server_lt.id
+    id      = aws_launch_template.app_lt.id
     version = "$Latest"
   }
-
-  load_balancers            = [aws_elb.app_clb.name]
-  health_check_type         = "EC2"
-  health_check_grace_period = 300
+  vpc_zone_identifier = var.subnet_ids
+  load_balancers      = [aws_elb.app_clb.name]
 
   tag {
     key                 = "Name"
-    value               = "${var.app_bucket_name}-AppServer"
+    value               = "${var.app_name}-asg-instance"
     propagate_at_launch = true
   }
+
+  tag {
+    key                 = "Environment"
+    value               = var.environment
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "Application"
+    value               = var.app_name
+    propagate_at_launch = true
+  }
+
+  # Instance refresh to ensure new instances get latest JAR
+  instance_refresh {
+    strategy = "Rolling"
+    preferences {
+      min_healthy_percentage = 50
+    }
+  }
 }
 
-############################################
-# Scale Out Policy and Alarm
-############################################
-resource "aws_autoscaling_policy" "scale_out_policy" {
-  name                   = "${var.app_bucket_name}-scale-out"
-  autoscaling_group_name = aws_autoscaling_group.app_asg.name
-  policy_type            = "SimpleScaling"
-  adjustment_type        = "ChangeInCapacity"
+# CloudWatch Alarm for scaling up
+resource "aws_autoscaling_policy" "scale_up" {
+  name                   = "${var.app_name}-scale-up"
   scaling_adjustment     = 1
-  cooldown               = 180
-}
-
-resource "aws_cloudwatch_metric_alarm" "scale_out_alarm" {
-  alarm_name          = "${var.app_bucket_name}-high-cpu"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 2
-  metric_name         = "CPUUtilization"
-  namespace           = "AWS/EC2"
-  period              = 60
-  statistic           = "Average"
-  threshold           = 70
-  alarm_description   = "Scale out if average CPU > 70% for 2 minutes"
-  alarm_actions       = [aws_autoscaling_policy.scale_out_policy.arn]
-  dimensions = {
-    AutoScalingGroupName = aws_autoscaling_group.app_asg.name
-  }
-}
-############################################
-# Scale In Policy and Alarm
-############################################
-resource "aws_autoscaling_policy" "scale_in_policy" {
-  name                   = "${var.app_bucket_name}-scale-in"
-  autoscaling_group_name = aws_autoscaling_group.app_asg.name
-  policy_type            = "SimpleScaling"
   adjustment_type        = "ChangeInCapacity"
-  scaling_adjustment     = -1
-  cooldown               = 180
+  cooldown               = 300
+  autoscaling_group_name = aws_autoscaling_group.app_asg.name
 }
 
-resource "aws_cloudwatch_metric_alarm" "scale_in_alarm" {
-  alarm_name          = "${var.app_bucket_name}-low-cpu"
-  comparison_operator = "LessThanThreshold"
-  evaluation_periods  = 2
+resource "aws_cloudwatch_metric_alarm" "high_cpu" {
+  alarm_name          = "${var.app_name}-high-cpu"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "2"
   metric_name         = "CPUUtilization"
   namespace           = "AWS/EC2"
-  period              = 60
+  period              = "120"
   statistic           = "Average"
-  threshold           = 30
-  alarm_description   = "Scale in if average CPU < 30% for 2 minutes"
-  alarm_actions       = [aws_autoscaling_policy.scale_in_policy.arn]
+  threshold           = "70"
+
   dimensions = {
     AutoScalingGroupName = aws_autoscaling_group.app_asg.name
   }
+
+  alarm_description = "This metric monitors EC2 CPU utilization"
+  alarm_actions     = [aws_autoscaling_policy.scale_up.arn]
 }
 
-resource "aws_cloudwatch_dashboard" "asg_dashboard" {
-  dashboard_name = "${var.app_bucket_name}-asg-dashboard"
-  dashboard_body = jsonencode({
-    widgets = [
-      {
-        type   = "metric",
-        x      = 0,
-        y      = 0,
-        width  = 12,
-        height = 6,
-        properties = {
-          metrics = [
-            ["AWS/AutoScaling", "GroupInServiceInstances", "AutoScalingGroupName", aws_autoscaling_group.app_asg.name],
-            [".", "GroupTotalInstances", ".", "."],
-            [".", "GroupPendingInstances", ".", "."]
-          ],
-          period = 60,
-          stat   = "Average",
-          region = var.aws_region,
-          title  = "Auto Scaling Instance Activity"
-        }
-      }
-    ]
-  })
+# CloudWatch Alarm for scaling down
+resource "aws_autoscaling_policy" "scale_down" {
+  name                   = "${var.app_name}-scale-down"
+  scaling_adjustment     = -1
+  adjustment_type        = "ChangeInCapacity"
+  cooldown               = 300
+  autoscaling_group_name = aws_autoscaling_group.app_asg.name
+}
+
+resource "aws_cloudwatch_metric_alarm" "low_cpu" {
+  alarm_name          = "${var.app_name}-low-cpu"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = "120"
+  statistic           = "Average"
+  threshold           = "30"
+
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.app_asg.name
+  }
+
+  alarm_description = "This metric monitors EC2 CPU utilization"
+  alarm_actions     = [aws_autoscaling_policy.scale_down.arn]
 }
