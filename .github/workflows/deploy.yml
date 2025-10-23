@@ -32,6 +32,18 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-south-1
 
+      - name: Get S3 Bucket Name from Terraform
+        id: s3-bucket
+        run: |
+          cd terraform
+          BUCKET_NAME=$(terraform output -raw s3_bucket_name 2>/dev/null || echo "")
+          if [ -z "$BUCKET_NAME" ]; then
+            # Fallback to the expected bucket name pattern
+            BUCKET_NAME="hellomvc-dev-jar-bucket"
+          fi
+          echo "bucket_name=$BUCKET_NAME" >> $GITHUB_OUTPUT
+          echo "Using S3 bucket: $BUCKET_NAME"
+
       - name: Upload JAR to S3
         run: |
           # Find the JAR file
@@ -45,7 +57,22 @@ jobs:
           
           echo "Uploading JAR: $JAR_FILE"
           
-          # Upload with specific filename that matches your user data
-          aws s3 cp "$JAR_FILE" s3://balteen121/hellomvc-0.0.1-SNAPSHOT.jar
+          # Upload to the correct S3 bucket from Terraform
+          aws s3 cp "$JAR_FILE" s3://${{ steps.s3-bucket.outputs.bucket_name }}/hellomvc-0.0.1-SNAPSHOT.jar
           
-          echo "JAR uploaded successfully to s3://balteen121/hellomvc-0.0.1-SNAPSHOT.jar"
+          echo "JAR uploaded successfully to s3://${{ steps.s3-bucket.outputs.bucket_name }}/hellomvc-0.0.1-SNAPSHOT.jar"
+
+      - name: Verify Auto Scaling Group
+        run: |
+          echo "Checking Auto Scaling Group status..."
+          aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names hellomvc-asg \
+            --query 'AutoScalingGroups[0].{MinSize:MinSize, MaxSize:MaxSize, DesiredCapacity:DesiredCapacity, Instances:Instances[*].InstanceId}' \
+            --region ap-south-1
+
+      - name: Trigger Instance Refresh (Optional)
+        run: |
+          echo "If you want to force instances to update immediately, run:"
+          echo "aws autoscaling start-instance-refresh --auto-scaling-group-name hellomvc-asg --region ap-south-1"
+          # Uncomment the line below if you want automatic instance refresh
+          # aws autoscaling start-instance-refresh --auto-scaling-group-name hellomvc-asg --region ap-south-1
