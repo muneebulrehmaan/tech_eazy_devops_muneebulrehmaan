@@ -94,8 +94,10 @@ inputFiles.lst
 ./terraform:
 asg.tf
 clb.tf
+dashboard.tf
 ec2.tf
 iam.tf
+jdk-25_windows-x64_bin.exe*
 mykey.pem
 outputs.tf
 policy/
@@ -110,11 +112,9 @@ variables.tf
 
 ./terraform/policy:
 cloudwatch.json
-ec2-logs.json
 ec2-scale.json
-elb-logs.json
 jar-bucket.json
 
 ./terraform/scripts:
 generator.py*
-user-data.sh.tpl*
+user-data.sh*

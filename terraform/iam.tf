@@ -33,7 +33,7 @@ resource "aws_iam_role_policy" "s3_policy" {
   role = aws_iam_role.ec2_role.id
 
   policy = templatefile("${path.module}/policy/jar-bucket.json", {
-    s3_bucket       = aws_s3_bucket.app_jar_bucket.bucket
+    s3_bucket = aws_s3_bucket.app_jar_bucket.bucket
   })
 }
 
