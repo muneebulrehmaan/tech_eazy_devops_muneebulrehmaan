@@ -29,7 +29,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install requests
+          pip install requests boto3  # ← ADD BOTO3 HERE
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -78,8 +78,8 @@ jobs:
           echo "⏱️ Duration: ${{ github.event.inputs.test_duration }} minutes"
           echo ""
           
-          # Use your actual generator.py script
-            python terraform/scripts/generator.py "${{ steps.find-clb.outputs.clb_url }}" "${{ github.event.inputs.test_duration }}"
+          python terraform/scripts/generator.py "${{ steps.find-clb.outputs.clb_url }}" "${{ github.event.inputs.test_duration }}"
+
       - name: Wait for scaling activities
         run: |
           echo "⏳ Waiting for scaling activities to complete..."
