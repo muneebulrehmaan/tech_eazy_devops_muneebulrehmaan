@@ -1,60 +1,75 @@
-name: Build and Deploy App
+name: Deploy JAR to AWS
 
 on:
-  push:
-    branches:
-      - pr-task
-    paths:
-      - 'app/**'
-      - 'terraform/**'
-      - '.github/workflows/deploy.yml'
+  workflow_dispatch: # manual trigger
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
-    env:
-      AWS_REGION: ap-south-1
-      S3_BUCKET: balteen121
-      TF_WORKDIR: ./terraform
-
     steps:
-      # 1️⃣ Checkout repository
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2️⃣ Set up JDK (for building the JAR)
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
           java-version: '17'
+          distribution: 'temurin'
 
-      # 4️⃣ Configure AWS credentials
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-            # 6️⃣ Install Terraform
-      - name: Install Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.13.3
-
-      # 5️⃣ Upload latest JAR to S3
-      - name: Upload JAR to S3
-        run: |
-          JAR_NAME=$(ls app/target/*.jar | xargs -n 1 basename)
-          echo "Uploading $JAR_NAME to S3..."
-          aws s3 cp app/target/${JAR_NAME} s3://${{ env.S3_BUCKET }}/${JAR_NAME} --acl bucket-owner-full-control
-          echo "✅ Uploaded ${JAR_NAME} to S3 bucket ${{ env.S3_BUCKET }}"
-           # 3️⃣ Build the JAR using Maven
       - name: Build JAR
         run: |
           cd app
           mvn clean package -DskipTests
-          ls target
 
-    
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Get S3 Bucket Name from Terraform
+        id: s3-bucket
+        run: |
+          cd terraform
+          BUCKET_NAME=$(terraform output -raw s3_bucket_name 2>/dev/null || echo "")
+          if [ -z "$BUCKET_NAME" ]; then
+            # Fallback to the expected bucket name pattern
+            BUCKET_NAME="hellomvc-dev-jar-bucket"
+          fi
+          echo "bucket_name=$BUCKET_NAME" >> $GITHUB_OUTPUT
+          echo "Using S3 bucket: $BUCKET_NAME"
+
+      - name: Upload JAR to S3
+        run: |
+          # Find the JAR file
+          JAR_FILE=$(find app/target -name "*.jar" -not -name "*sources*" -not -name "*javadoc*" | head -n 1)
+          
+          # Check if JAR file exists
+          if [ -z "$JAR_FILE" ]; then
+            echo "Error: No JAR file found in app/target/"
+            exit 1
+          fi
+          
+          echo "Uploading JAR: $JAR_FILE"
+          
+          # Upload to the correct S3 bucket from Terraform
+          aws s3 cp "$JAR_FILE" s3://${{ steps.s3-bucket.outputs.bucket_name }}/hellomvc-0.0.1-SNAPSHOT.jar
+          
+          echo "JAR uploaded successfully to s3://${{ steps.s3-bucket.outputs.bucket_name }}/hellomvc-0.0.1-SNAPSHOT.jar"
+
+      - name: Verify Auto Scaling Group
+        run: |
+          echo "Checking Auto Scaling Group status..."
+          aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names hellomvc-asg \
+            --query 'AutoScalingGroups[0].{MinSize:MinSize, MaxSize:MaxSize, DesiredCapacity:DesiredCapacity, Instances:Instances[*].InstanceId}' \
+            --region ap-south-1
+
+      - name: Trigger Instance Refresh (Optional)
+        run: |
+          echo "If you want to force instances to update immediately, run:"
+          echo "aws autoscaling start-instance-refresh --auto-scaling-group-name hellomvc-asg --region ap-south-1"
+          # Uncomment the line below if you want automatic instance refresh
+          # aws autoscaling start-instance-refresh --auto-scaling-group-name hellomvc-asg --region ap-south-1
