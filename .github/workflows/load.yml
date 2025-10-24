@@ -1,0 +1,92 @@
+name: Load Test Auto Scaling
+
+on:
+  workflow_dispatch:  # Manual trigger only
+    inputs:
+      test_duration:
+        description: 'Test duration in minutes'
+        required: true
+        default: '10'
+        type: choice
+        options:
+        - '5'
+        - '10'
+        - '15'
+        - '20'
+
+jobs:
+  load-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Get Load Balancer URL
+        id: get-clb
+        run: |
+          cd terraform
+          CLB_URL=$(terraform output -raw clb_dns_name 2>/dev/null || echo "hellomvc-clb-1606703946.ap-south-1.elb.amazonaws.com")
+          echo "clb_url=$CLB_URL" >> $GITHUB_OUTPUT
+          echo "Load Balancer URL: $CLB_URL"
+
+      - name: Check current Auto Scaling state
+        run: |
+          echo "=== Current Auto Scaling State ==="
+          aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names hellomvc-asg \
+            --region ap-south-1 \
+            --query 'AutoScalingGroups[0].{Desired:DesiredCapacity, Min:MinSize, Max:MaxSize, Instances:Instances[*].InstanceId}' \
+            --output table
+
+      - name: Run Load Test
+        run: |
+          echo "=== Starting Load Test ==="
+          echo "Target: ${{ steps.get-clb.outputs.clb_url }}"
+          echo "Duration: ${{ github.event.inputs.test_duration }} minutes"
+          
+          python terraform/scripts/generator.py ${{ steps.get-clb.outputs.clb_url }} ${{ github.event.inputs.test_duration }}
+
+      - name: Wait for scaling to complete
+        run: |
+          echo "Waiting 2 minutes for scaling activities..."
+          sleep 120
+
+      - name: Check scaling results
+        run: |
+          echo "=== Scaling Activities ==="
+          aws autoscaling describe-scaling-activities \
+            --auto-scaling-group-name hellomvc-asg \
+            --region ap-south-1 \
+            --query 'Activities[0:5].{Time:StartTime, Activity:Description, Status:StatusCode}' \
+            --output table
+
+          echo "=== Final Auto Scaling State ==="
+          aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names hellomvc-asg \
+            --region ap-south-1 \
+            --query 'AutoScalingGroups[0].{Desired:DesiredCapacity, Instances:Instances[*].InstanceId}' \
+            --output table
+
+      - name: Generate test report
+        run: |
+          echo "=== Load Test Complete ==="
+          echo "✅ Check CloudWatch dashboard for detailed metrics:"
+          echo "https://ap-south-1.console.aws.amazon.com/cloudwatch/home?region=ap-south-1#dashboards:name=hellomvc-dev-dashboard"
