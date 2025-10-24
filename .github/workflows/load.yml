@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       test_duration:
-        description: 'Test duration in minutes'
+        description: 'Test duration'
         required: true
-        default: '10'
+        default: '8'
         type: choice
         options:
         - '5'
@@ -39,29 +39,31 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-south-1
 
-      - name: Get Load Balancer URL and verify connectivity
+      - name: Get current Load Balancer URL from Terraform
         id: get-clb
         run: |
           cd terraform
-          CLB_URL=$(terraform output -raw clb_dns_name 2>/dev/null || echo "hellomvc-clb-1606703946.ap-south-1.elb.amazonaws.com")
-          echo "clb_url=$CLB_URL" >> $GITHUB_OUTPUT
           
-          echo "Load Balancer URL: $CLB_URL"
-          echo "Testing DNS resolution..."
+          # Initialize Terraform if needed
+          terraform init -input=false
           
-          # Test if we can resolve the DNS
-          if nslookup $CLB_URL; then
-            echo "✅ DNS resolution successful"
-          else
-            echo "❌ DNS resolution failed, this might cause issues"
+          # Get the current CLB URL from Terraform state
+          CLB_URL=$(terraform output -raw clb_dns_name)
+          if [ -z "$CLB_URL" ]; then
+            echo "❌ ERROR: Could not get CLB URL from Terraform outputs"
+            echo "Make sure terraform apply has been run successfully"
+            exit 1
           fi
           
-          # Test basic connectivity
-          echo "Testing connectivity (timeout 10s)..."
-          if curl -s --max-time 10 http://$CLB_URL/hello > /dev/null; then
-            echo "✅ Connectivity test passed"
+          echo "clb_url=$CLB_URL" >> $GITHUB_OUTPUT
+          echo "✅ Current Load Balancer URL: $CLB_URL"
+          
+          # Test connectivity
+          echo "Testing connectivity to application..."
+          if curl -s --max-time 10 "http://$CLB_URL/hello" > /dev/null; then
+            echo "✅ Application is accessible"
           else
-            echo "⚠️ Connectivity test failed, but continuing anyway"
+            echo "⚠️ Application not accessible, but continuing test"
           fi
 
       - name: Check current Auto Scaling state
@@ -73,21 +75,20 @@ jobs:
             --query 'AutoScalingGroups[0].{Desired:DesiredCapacity, Min:MinSize, Max:MaxSize, Instances:Instances[*].InstanceId}' \
             --output table
 
-      - name: Run Load Test with error handling
+      - name: Run Load Test
         run: |
           echo "=== Starting Load Test ==="
           echo "Target: ${{ steps.get-clb.outputs.clb_url }}"
           echo "Duration: ${{ github.event.inputs.test_duration }} minutes"
           
-          # Create a more robust Python script
+          # Create robust load test script
           cat > /tmp/load_test.py << 'EOF'
           import requests
           import time
-          import random
           import sys
           from datetime import datetime
           
-          class RobustTrafficGenerator:
+          class TrafficGenerator:
               def __init__(self, base_url):
                   self.base_url = base_url
                   self.request_count = 0
@@ -95,35 +96,31 @@ jobs:
                   
               def make_request(self, endpoint="hello"):
                   try:
-                      # Increased timeout and retry logic
-                      response = requests.get(f"{self.base_url}/{endpoint}", timeout=15)
+                      response = requests.get(f"{self.base_url}/{endpoint}", timeout=10)
                       self.request_count += 1
                       if self.request_count % 20 == 0:
                           print(f"[{datetime.now()}] Requests: {self.request_count}, Failed: {self.failed_count}")
                       return True
                   except Exception as e:
                       self.failed_count += 1
-                      if self.failed_count % 10 == 0:  # Log every 10 failures
+                      if self.failed_count % 10 == 0:
                           print(f"[{datetime.now()}] Request failed ({self.failed_count} total): {type(e).__name__}")
                       return False
               
               def generate_traffic(self, requests_per_second, duration_seconds):
-                  print(f"Generating {requests_per_second} req/sec for {duration_seconds} seconds")
+                  print(f"📊 Generating {requests_per_second} req/sec for {duration_seconds} seconds")
                   end_time = time.time() + duration_seconds
-                  success_count = 0
                   
                   while time.time() < end_time:
-                      success_in_batch = 0
+                      success_count = 0
                       for _ in range(requests_per_second):
                           if self.make_request():
-                              success_in_batch += 1
+                              success_count += 1
                       
-                      if success_in_batch == 0:
-                          print(f"⚠️ Batch failed completely, continuing...")
+                      if success_count == 0:
+                          print(f"⚠️  Batch failed completely")
                       
                       time.sleep(1)
-                  
-                  return success_count
           
           if __name__ == "__main__":
               if len(sys.argv) < 2:
@@ -131,58 +128,65 @@ jobs:
                   sys.exit(1)
               
               clb_url = f"http://{sys.argv[1]}"
-              duration_minutes = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+              duration_minutes = int(sys.argv[2]) if len(sys.argv) > 2 else 8
               
-              print(f"🚀 Starting robust load test for {duration_minutes} minutes")
+              print(f"🚀 Starting load test for {duration_minutes} minutes")
               print(f"🎯 Target: {clb_url}")
               
-              generator = RobustTrafficGenerator(clb_url)
+              generator = TrafficGenerator(clb_url)
               total_seconds = duration_minutes * 60
-              phase_duration = total_seconds // 3
               
-              print(f"📊 Phase 1: Normal traffic (2 min)")
-              generator.generate_traffic(2, 120)
-              
-              print(f"📊 Phase 2: High traffic (should trigger scaling) (4 min)")
-              generator.generate_traffic(15, 240)
-              
-              print(f"📊 Phase 3: Back to normal (4 min)")
-              generator.generate_traffic(2, 240)
+              # 8-minute optimized pattern
+              if duration_minutes == 8:
+                  print("📍 Phase 1: Normal traffic (2 min)")
+                  generator.generate_traffic(2, 120)
+                  
+                  print("📍 Phase 2: High traffic - trigger scaling (4 min)")
+                  generator.generate_traffic(15, 240)
+                  
+                  print("📍 Phase 3: Back to normal (2 min)")
+                  generator.generate_traffic(2, 120)
+              else:
+                  # Flexible timing for other durations
+                  phase_duration = total_seconds // 3
+                  print(f"📍 Phase 1: Normal traffic ({phase_duration//60} min)")
+                  generator.generate_traffic(2, phase_duration)
+                  
+                  print(f"📍 Phase 2: High traffic ({phase_duration//60} min)")
+                  generator.generate_traffic(15, phase_duration)
+                  
+                  print(f"📍 Phase 3: Back to normal ({phase_duration//60} min)")
+                  generator.generate_traffic(2, phase_duration)
               
               print(f"✅ Load test completed!")
-              print(f"📈 Total requests attempted: {generator.request_count + generator.failed_count}")
+              print(f"📈 Total requests: {generator.request_count + generator.failed_count}")
               print(f"✅ Successful: {generator.request_count}")
               print(f"❌ Failed: {generator.failed_count}")
-              print(f"📊 Success rate: {generator.request_count/(generator.request_count + generator.failed_count)*100:.1f}%")
           EOF
           
           python /tmp/load_test.py "${{ steps.get-clb.outputs.clb_url }}" "${{ github.event.inputs.test_duration }}"
 
-      - name: Wait for scaling activities
+      - name: Monitor scaling results
         run: |
-          echo "Waiting 2 minutes for scaling to complete..."
+          echo "Waiting for scaling activities..."
           sleep 120
-
-      - name: Check scaling results
-        run: |
+          
           echo "=== Scaling Activities ==="
           aws autoscaling describe-scaling-activities \
             --auto-scaling-group-name hellomvc-asg \
             --region ap-south-1 \
             --query 'Activities[0:5].{Time:StartTime, Activity:Description, Status:StatusCode}' \
-            --output table || echo "No scaling activities found"
-
-          echo "=== Final Auto Scaling State ==="
+            --output table || echo "No recent scaling activities"
+            
+          echo "=== Final State ==="
           aws autoscaling describe-auto-scaling-groups \
             --auto-scaling-group-names hellomvc-asg \
             --region ap-south-1 \
             --query 'AutoScalingGroups[0].{Desired:DesiredCapacity, Instances:Instances[*].InstanceId}' \
             --output table
 
-      - name: Generate test report
+      - name: Generate report
         run: |
-          echo "=== Load Test Report ==="
-          echo "✅ Load test completed (some DNS failures are expected in GitHub Actions)"
-          echo "🔍 Check CloudWatch dashboard for scaling metrics:"
+          echo "=== Load Test Complete ==="
+          echo "📊 Check CloudWatch dashboard for metrics:"
           echo "https://ap-south-1.console.aws.amazon.com/cloudwatch/home?region=ap-south-1#dashboards:name=hellomvc-dev-dashboard"
-          echo "💡 If scaling didn't trigger, the DNS issues may have reduced effective traffic"
