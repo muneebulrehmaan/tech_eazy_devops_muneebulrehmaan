@@ -38,7 +38,7 @@ resource "aws_autoscaling_group" "app_asg" {
     preferences {
       min_healthy_percentage = 50
     }
-    triggers = ["launch_template"]
+
   }
 }
 
@@ -116,7 +116,7 @@ resource "aws_cloudwatch_metric_alarm" "low_traffic" {
   namespace           = "AWS/ELB"
   period              = "60"
   statistic           = "Sum"
-  threshold           = "300"
+  threshold           = "180"
 
   dimensions = {
     LoadBalancerName = aws_elb.app_clb.name
