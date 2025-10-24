@@ -1,84 +1,65 @@
-############################################
-# IAM Role for EC2
-############################################
-
+# IAM role for EC2 instances
 resource "aws_iam_role" "ec2_role" {
-  name = "ec2-app-role"
+  name = "${var.app_name}-ec2-role-${var.environment}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
+        Action = "sts:AssumeRole"
         Effect = "Allow"
         Principal = {
           Service = "ec2.amazonaws.com"
         }
-        Action = "sts:AssumeRole"
       }
     ]
   })
+
+  tags = {
+    Name        = "${var.app_name}-ec2-role"
+    Environment = var.environment
+  }
 }
 
-############################################
-# IAM Policies
-############################################
-
-# EC2 can read the JAR file from the S3 app bucket
-resource "aws_iam_policy" "jar_bucket_policy" {
-  name        = "jar-bucket-policy"
-  description = "Allow EC2 to access the app JAR in S3"
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:ListBucket"
-        ]
-        Resource = [
-          aws_s3_bucket.jar_bucket.arn,
-          "${aws_s3_bucket.jar_bucket.arn}/*"
-        ]
-      }
-    ]
-  })
-}
-
-resource "aws_iam_policy" "ec2_logs_policy" {
-  name        = "ec2-logs-policy"
-  description = "Allow EC2 to upload logs to S3"
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = ["s3:PutObject"]
-        Resource = "${aws_s3_bucket.ec2_logs_bucket.arn}/*"
-      }
-    ]
-  })
-}
-
-############################################
-# Attach Policies to Role
-############################################
-
-resource "aws_iam_role_policy_attachment" "attach_jar_bucket_policy" {
-  role       = aws_iam_role.ec2_role.name
-  policy_arn = aws_iam_policy.jar_bucket_policy.arn
-}
-
-resource "aws_iam_role_policy_attachment" "attach_ec2_logs_policy" {
-  role       = aws_iam_role.ec2_role.name
-  policy_arn = aws_iam_policy.ec2_logs_policy.arn
-}
-
-############################################
-# Instance Profile
-############################################
-
-resource "aws_iam_instance_profile" "ec2_profile" {
-  name = "ec2-app-instance-profile"
+# IAM instance profile
+resource "aws_iam_instance_profile" "ec2_instance_profile" {
+  name = "${var.app_name}-ec2-instance-profile-${var.environment}"
   role = aws_iam_role.ec2_role.name
+}
+
+# Attach policies to the role
+resource "aws_iam_role_policy" "s3_policy" {
+  name = "${var.app_name}-s3-policy-${var.environment}"
+  role = aws_iam_role.ec2_role.id
+
+  policy = templatefile("${path.module}/policy/jar-bucket.json", {
+    s3_bucket = aws_s3_bucket.app_jar_bucket.bucket
+  })
+}
+
+resource "aws_iam_role_policy" "cloudwatch_policy" {
+  name = "${var.app_name}-cloudwatch-policy-${var.environment}"
+  role = aws_iam_role.ec2_role.id
+
+  policy = templatefile("${path.module}/policy/cloudwatch.json", {
+    app_name = var.app_name
+  })
+}
+
+resource "aws_iam_role_policy" "autoscaling_policy" {
+  name = "${var.app_name}-autoscaling-policy-${var.environment}"
+  role = aws_iam_role.ec2_role.id
+
+  policy = file("${path.module}/policy/ec2-scale.json")
+}
+
+# Attach AWS managed policies for additional permissions
+resource "aws_iam_role_policy_attachment" "cloudwatch_agent_policy" {
+  role       = aws_iam_role.ec2_role.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+
+resource "aws_iam_role_policy_attachment" "ssm_core_policy" {
+  role       = aws_iam_role.ec2_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }

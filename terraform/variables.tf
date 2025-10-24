@@ -1,32 +1,62 @@
-
-#############################################
-# Variable Definitions for EC2 + CLB Setup
-#############################################
-
-# S3 bucket name for the app JAR
-variable "app_bucket_name" {
-  description = "S3 bucket name for the application JAR"
+variable "aws_region" {
+  description = "AWS region"
   type        = string
-  default     = "balteen121"
+  default     = "ap-south-1"
 }
 
-# Instance type
+variable "app_name" {
+  description = "Application name"
+  type        = string
+  default     = "hellomvc"
+}
+
+variable "environment" {
+  description = "Environment name"
+  type        = string
+  default     = "dev"
+}
+
+variable "vpc_id" {
+  description = "VPC ID"
+  type        = string
+}
+
+variable "subnet_ids" {
+  description = "List of subnet IDs"
+  type        = list(string)
+}
+
+variable "key_name" {
+  description = "EC2 Key Pair name"
+  type        = string
+}
+
+variable "jar_file_name" {
+  description = "Name of the JAR file in S3"
+  type        = string
+  default     = "hellomvc-0.0.1-SNAPSHOT.jar"
+}
+
 variable "instance_type" {
   description = "EC2 instance type"
   type        = string
   default     = "t3.micro"
 }
 
-# Number of EC2 instances (for load balancing)
-variable "instance_count" {
-  description = "Number of EC2 instances to launch"
+variable "min_size" {
+  description = "Minimum number of instances"
   type        = number
   default     = 2
 }
 
-# AWS region
-variable "region" {
-  description = "AWS region to deploy resources"
-  type        = string
-  default     = "ap-south-1"
+variable "max_size" {
+  description = "Maximum number of instances"
+  type        = number
+  default     = 4
+}
+
+variable "desired_capacity" {
+  description = "Desired number of instances"
+  type        = number
+  default     = 2
 }
