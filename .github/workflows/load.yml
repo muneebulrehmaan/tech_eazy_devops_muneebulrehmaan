@@ -1,18 +1,18 @@
 name: Load Test Auto Scaling
 
 on:
-  workflow_dispatch:  # Manual trigger only
+  workflow_dispatch:
     inputs:
       test_duration:
-        description: 'Test duration in minutes'
+        description: 'Test duration (minutes)'
         required: true
-        default: '10'
+        default: '8'
         type: choice
         options:
         - '5'
-        - '10'
+        - '8'
+        - '12'
         - '15'
-        - '20'
 
 jobs:
   load-test:
@@ -27,10 +27,9 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install requests
+          pip install requests boto3  # ← ADD BOTO3 HERE
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -39,34 +38,51 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-south-1
 
-      - name: Get Load Balancer URL
-        id: get-clb
+      - name: Find Load Balancer by Name Pattern
+        id: find-clb
         run: |
-          cd terraform
-          CLB_URL=$(terraform output -raw clb_dns_name 2>/dev/null || echo "hellomvc-clb-1606703946.ap-south-1.elb.amazonaws.com")
+          echo "🔍 Searching for Load Balancer..."
+          
+          # Get all Classic Load Balancers and filter by name pattern
+          CLB_URL=$(aws elb describe-load-balancers \
+            --region ap-south-1 \
+            --query 'LoadBalancerDescriptions[?starts_with(LoadBalancerName, `hellomvc-clb`)].DNSName' \
+            --output text)
+          
+          if [ -z "$CLB_URL" ]; then
+            echo "❌ ERROR: No Load Balancer found starting with 'hellomvc-clb'"
+            echo ""
+            echo "💡 Troubleshooting:"
+            echo "1. Make sure your infrastructure is deployed: terraform apply"
+            echo "2. Check the exact CLB name in AWS Console"
+            echo "3. Run this locally to find it: aws elb describe-load-balancers --region ap-south-1 --query 'LoadBalancerDescriptions[].LoadBalancerName'"
+            exit 1
+          fi
+          
           echo "clb_url=$CLB_URL" >> $GITHUB_OUTPUT
-          echo "Load Balancer URL: $CLB_URL"
+          echo "✅ Found Load Balancer: $CLB_URL"
 
-      - name: Check current Auto Scaling state
+      - name: Check Auto Scaling Group Status
         run: |
-          echo "=== Current Auto Scaling State ==="
+          echo "=== Auto Scaling Group Status ==="
           aws autoscaling describe-auto-scaling-groups \
             --auto-scaling-group-names hellomvc-asg \
             --region ap-south-1 \
-            --query 'AutoScalingGroups[0].{Desired:DesiredCapacity, Min:MinSize, Max:MaxSize, Instances:Instances[*].InstanceId}' \
+            --query 'AutoScalingGroups[0].{Desired:DesiredCapacity, Instances:Instances[*].InstanceId}' \
             --output table
 
-      - name: Run Load Test
+      - name: Run Load Test using generator.py
         run: |
-          echo "=== Starting Load Test ==="
-          echo "Target: ${{ steps.get-clb.outputs.clb_url }}"
-          echo "Duration: ${{ github.event.inputs.test_duration }} minutes"
+          echo "🚀 Starting Load Test"
+          echo "🎯 Target: ${{ steps.find-clb.outputs.clb_url }}"
+          echo "⏱️ Duration: ${{ github.event.inputs.test_duration }} minutes"
+          echo ""
           
-          python terraform/scripts/generator.py ${{ steps.get-clb.outputs.clb_url }} ${{ github.event.inputs.test_duration }}
+          python terraform/scripts/generator.py "${{ steps.find-clb.outputs.clb_url }}" "${{ github.event.inputs.test_duration }}"
 
-      - name: Wait for scaling to complete
+      - name: Wait for scaling activities
         run: |
-          echo "Waiting 2 minutes for scaling activities..."
+          echo "⏳ Waiting for scaling activities to complete..."
           sleep 120
 
       - name: Check scaling results
@@ -76,9 +92,11 @@ jobs:
             --auto-scaling-group-name hellomvc-asg \
             --region ap-south-1 \
             --query 'Activities[0:5].{Time:StartTime, Activity:Description, Status:StatusCode}' \
-            --output table
+            --output table || echo "No recent scaling activities found"
 
-          echo "=== Final Auto Scaling State ==="
+      - name: Final status check
+        run: |
+          echo "=== Final Auto Scaling Status ==="
           aws autoscaling describe-auto-scaling-groups \
             --auto-scaling-group-names hellomvc-asg \
             --region ap-south-1 \
@@ -87,6 +105,10 @@ jobs:
 
       - name: Generate test report
         run: |
-          echo "=== Load Test Complete ==="
-          echo "✅ Check CloudWatch dashboard for detailed metrics:"
-          echo "https://ap-south-1.console.aws.amazon.com/cloudwatch/home?region=ap-south-1#dashboards:name=hellomvc-dev-dashboard"
+          echo "🎉 Load Test Complete!"
+          echo ""
+          echo "📊 Next steps:"
+          echo "1. Check CloudWatch dashboard for metrics:"
+          echo "   https://ap-south-1.console.aws.amazon.com/cloudwatch/home?region=ap-south-1#dashboards:name=hellomvc-dev-dashboard"
+          echo "2. View Auto Scaling activities in AWS Console"
+          echo "3. Check instance metrics and scaling events"
