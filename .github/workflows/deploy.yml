@@ -2,9 +2,6 @@ name: Deploy JAR to AWS
 
 on:
   workflow_dispatch: # manual trigger
-  push:
-    branches:
-      - pr-task
 
 jobs:
   deploy:
