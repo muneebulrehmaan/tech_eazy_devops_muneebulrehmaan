@@ -79,8 +79,7 @@ jobs:
           echo ""
           
           # Use your actual generator.py script
-          python terraform/scripts/generator.py "${{ steps.find-clb.outputs.clb_url }}" "${{ github.event.inputs.test_duration }}"
-
+          python generator.py "${{ steps.find-clb.outputs.clb_url }}" "${{ github.event.inputs.test_duration }}"
       - name: Wait for scaling activities
         run: |
           echo "⏳ Waiting for scaling activities to complete..."
