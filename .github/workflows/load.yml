@@ -22,14 +22,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
+          # Install only what generator.py needs
           pip install requests
 
       - name: Configure AWS credentials
@@ -43,132 +49,37 @@ jobs:
         id: get-clb
         run: |
           cd terraform
-          
-          # Initialize Terraform if needed
           terraform init -input=false
-          
-          # Get the current CLB URL from Terraform state
           CLB_URL=$(terraform output -raw clb_dns_name)
           if [ -z "$CLB_URL" ]; then
-            echo "❌ ERROR: Could not get CLB URL from Terraform outputs"
-            echo "Make sure terraform apply has been run successfully"
+            echo "❌ ERROR: Could not get CLB URL from Terraform"
             exit 1
           fi
-          
           echo "clb_url=$CLB_URL" >> $GITHUB_OUTPUT
-          echo "✅ Current Load Balancer URL: $CLB_URL"
-          
-          # Test connectivity
-          echo "Testing connectivity to application..."
-          if curl -s --max-time 10 "http://$CLB_URL/hello" > /dev/null; then
-            echo "✅ Application is accessible"
-          else
-            echo "⚠️ Application not accessible, but continuing test"
-          fi
+          echo "✅ Load Balancer URL: $CLB_URL"
 
       - name: Check current Auto Scaling state
         run: |
-          echo "=== Current Auto Scaling State ==="
+          echo "=== Before Test ==="
           aws autoscaling describe-auto-scaling-groups \
             --auto-scaling-group-names hellomvc-asg \
             --region ap-south-1 \
-            --query 'AutoScalingGroups[0].{Desired:DesiredCapacity, Min:MinSize, Max:MaxSize, Instances:Instances[*].InstanceId}' \
+            --query 'AutoScalingGroups[0].{Desired:DesiredCapacity, Instances:Instances[*].InstanceId}' \
             --output table
 
-      - name: Run Load Test
+      - name: Run Load Test using generator.py
         run: |
           echo "=== Starting Load Test ==="
+          echo "Using: terraform/scripts/generator.py"
           echo "Target: ${{ steps.get-clb.outputs.clb_url }}"
           echo "Duration: ${{ github.event.inputs.test_duration }} minutes"
           
-          # Create robust load test script
-          cat > /tmp/load_test.py << 'EOF'
-          import requests
-          import time
-          import sys
-          from datetime import datetime
-          
-          class TrafficGenerator:
-              def __init__(self, base_url):
-                  self.base_url = base_url
-                  self.request_count = 0
-                  self.failed_count = 0
-                  
-              def make_request(self, endpoint="hello"):
-                  try:
-                      response = requests.get(f"{self.base_url}/{endpoint}", timeout=10)
-                      self.request_count += 1
-                      if self.request_count % 20 == 0:
-                          print(f"[{datetime.now()}] Requests: {self.request_count}, Failed: {self.failed_count}")
-                      return True
-                  except Exception as e:
-                      self.failed_count += 1
-                      if self.failed_count % 10 == 0:
-                          print(f"[{datetime.now()}] Request failed ({self.failed_count} total): {type(e).__name__}")
-                      return False
-              
-              def generate_traffic(self, requests_per_second, duration_seconds):
-                  print(f"📊 Generating {requests_per_second} req/sec for {duration_seconds} seconds")
-                  end_time = time.time() + duration_seconds
-                  
-                  while time.time() < end_time:
-                      success_count = 0
-                      for _ in range(requests_per_second):
-                          if self.make_request():
-                              success_count += 1
-                      
-                      if success_count == 0:
-                          print(f"⚠️  Batch failed completely")
-                      
-                      time.sleep(1)
-          
-          if __name__ == "__main__":
-              if len(sys.argv) < 2:
-                  print("Usage: python load_test.py <CLB_DNS_NAME> [duration_minutes]")
-                  sys.exit(1)
-              
-              clb_url = f"http://{sys.argv[1]}"
-              duration_minutes = int(sys.argv[2]) if len(sys.argv) > 2 else 8
-              
-              print(f"🚀 Starting load test for {duration_minutes} minutes")
-              print(f"🎯 Target: {clb_url}")
-              
-              generator = TrafficGenerator(clb_url)
-              total_seconds = duration_minutes * 60
-              
-              # 8-minute optimized pattern
-              if duration_minutes == 8:
-                  print("📍 Phase 1: Normal traffic (2 min)")
-                  generator.generate_traffic(2, 120)
-                  
-                  print("📍 Phase 2: High traffic - trigger scaling (4 min)")
-                  generator.generate_traffic(15, 240)
-                  
-                  print("📍 Phase 3: Back to normal (2 min)")
-                  generator.generate_traffic(2, 120)
-              else:
-                  # Flexible timing for other durations
-                  phase_duration = total_seconds // 3
-                  print(f"📍 Phase 1: Normal traffic ({phase_duration//60} min)")
-                  generator.generate_traffic(2, phase_duration)
-                  
-                  print(f"📍 Phase 2: High traffic ({phase_duration//60} min)")
-                  generator.generate_traffic(15, phase_duration)
-                  
-                  print(f"📍 Phase 3: Back to normal ({phase_duration//60} min)")
-                  generator.generate_traffic(2, phase_duration)
-              
-              print(f"✅ Load test completed!")
-              print(f"📈 Total requests: {generator.request_count + generator.failed_count}")
-              print(f"✅ Successful: {generator.request_count}")
-              print(f"❌ Failed: {generator.failed_count}")
-          EOF
-          
-          python /tmp/load_test.py "${{ steps.get-clb.outputs.clb_url }}" "${{ github.event.inputs.test_duration }}"
+          # Use your actual generator.py script
+          python terraform/scripts/generator.py "${{ steps.get-clb.outputs.clb_url }}" "${{ github.event.inputs.test_duration }}"
 
       - name: Monitor scaling results
         run: |
-          echo "Waiting for scaling activities..."
+          echo "Waiting 2 minutes for scaling..."
           sleep 120
           
           echo "=== Scaling Activities ==="
@@ -177,8 +88,10 @@ jobs:
             --region ap-south-1 \
             --query 'Activities[0:5].{Time:StartTime, Activity:Description, Status:StatusCode}' \
             --output table || echo "No recent scaling activities"
-            
-          echo "=== Final State ==="
+
+      - name: Final state check
+        run: |
+          echo "=== After Test ==="
           aws autoscaling describe-auto-scaling-groups \
             --auto-scaling-group-names hellomvc-asg \
             --region ap-south-1 \
@@ -188,5 +101,4 @@ jobs:
       - name: Generate report
         run: |
           echo "=== Load Test Complete ==="
-          echo "📊 Check CloudWatch dashboard for metrics:"
-          echo "https://ap-south-1.console.aws.amazon.com/cloudwatch/home?region=ap-south-1#dashboards:name=hellomvc-dev-dashboard"
+          echo "📊 Check CloudWatch: https://ap-south-1.console.aws.amazon.com/cloudwatch/home?region=ap-south-1#dashboards:name=hellomvc-dev-dashboard"
